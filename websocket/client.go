@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -255,7 +256,7 @@ func (c *Client) reconnect(err error) error {
 
 func (c *Client) exit(err error) error {
 	c.terminal = true
-	c.close(err)
+	c.close()
 	return err
 }
 
@@ -277,11 +278,8 @@ func (c *Client) listenUpstream() {
 	}
 }
 
-func (c *Client) close(e error) {
+func (c *Client) close() {
 	if c.listener != nil {
-		if e != nil {
-			c.listener <- e
-		}
 		close(c.listener)
 	}
 
@@ -432,7 +430,7 @@ func (c *Client) handleChannel(msg []byte) error {
 	var data DataUpdate
 	err := json.Unmarshal(msg, &data)
 	if err != nil {
-		return err
+		return c.handleTrade(msg, err)
 	}
 
 	channel := strings.Split(data.ChannelName, "-")[0]
@@ -448,6 +446,31 @@ func (c *Client) handleChannel(msg []byte) error {
 	data.Data = result
 	c.listener <- data
 	return nil
+}
+
+func (c *Client) handleTrade(msg []byte, err error) error {
+	var v []interface{}
+	if err := json.Unmarshal(msg, &v); err != nil {
+		return err
+	}
+
+	if len(v) == 3 && v[1] == "ownTrades" {
+		for _, item := range v[0].([]interface{}) {
+			for _, v := range item.(map[string]interface{}) {
+				newTime, _ := strconv.ParseFloat(v.(map[string]interface{})["time"].(string), 64)
+				v.(map[string]interface{})["time"] = newTime
+			}
+		}
+
+		result, err := json.Marshal(v[0])
+		if err != nil {
+			return err
+		}
+
+		c.listener <- result
+		return nil
+	}
+	return err
 }
 
 // IsConnected returns true if the underlying asynchronous transport is connected to an endpoint.
